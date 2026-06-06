@@ -1,0 +1,407 @@
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{zed-csp}
+\usepackage{longtable}
+\usepackage{titlesec}
+\usepackage{setspace}
+
+\setstretch{1.2}
+
+\title{
+\textbf{NeuroScript}\\
+AI-Based Handwriting Analysis for Neurological Detection
+}
+
+\author{
+INTERNATIONAL ISLAMIC UNIVERSITY, ISLAMABAD\\
+Department of Software Engineering
+}
+
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\begin{center}
+\textbf{COURSE:} Formal Methods\\
+\textbf{INSTRUCTOR:} Ms. Saba Taimouri
+\end{center}
+
+\vspace{1cm}
+
+\textbf{Submitted By:}
+\begin{itemize}
+    \item Areesha Abbasi (4508-FOC/BSSE-F22-A)
+    \item Sajjal Khalil (4488-FOC/BSSE-F22-A)
+    \item Hajira Gul (4454-FOC/BSSE-F22-A)
+    \item Munazza Kanwal (4475-FOC/BSSE-F22-A)
+    \item Noor ul Harmain (4204-FBAS/BSSE-F21-A)
+\end{itemize}
+
+\newpage
+
+\tableofcontents
+
+\newpage
+
+\section{Introduction}
+
+NeuroScript is an AI-powered web-based system that performs non-invasive early screening for neurological conditions — specifically OCD and ADHD — by analysing handwriting samples submitted by clinicians, students, or researchers.
+
+The system accepts real-time stylus/finger input or digitised paper samples, extracts neuromotor features (stroke speed, spacing, letter formation), runs an LSTM-based classification model, and produces an explainable prediction via SHAP/LIME.
+
+This document presents a complete formal Z specification covering:
+
+\begin{itemize}
+    \item Basic types and free-type enumerations
+    \item State-space schema
+    \item Initial-state schema
+    \item Operational schemas for all major functions
+    \item Error-reporting schemas and robust combined operations
+\end{itemize}
+
+\section{Basic Types and Free-Type Declarations}
+
+\subsection{Basic Sets}
+
+The following application-independent sets are introduced as basic types:
+
+\[
+[USER, SAMPLEID, FEATUREVECTOR, EXPLANATION]
+\]
+
+\begin{itemize}
+    \item USER — The set of all registered system users.
+    \item SAMPLEID — Unique identifiers for handwriting samples.
+    \item FEATUREVECTOR — Extracted neuromotor feature vectors.
+    \item EXPLANATION — SHAP/LIME explanation objects.
+\end{itemize}
+
+\subsection{Free-Type Enumerations}
+
+\begin{zed}
+ROLE ::= Clinician | Researcher | Student | Admin
+\end{zed}
+
+\begin{zed}
+CONDITION ::= Normal | PotentialADHD | PotentialOCD | Inconclusive
+\end{zed}
+
+\begin{zed}
+SAMPLESTATUS ::= Pending | Processing | Analysed | Archived
+\end{zed}
+
+\begin{zed}
+REPORT ::= success | alreadyExists | notFound | invalidInput \\
+\t1 | unauthorised | limitExceeded | processingError
+\end{zed}
+
+\subsection{Global Constants}
+
+\[
+MAX\_SAMPLES\_PER\_USER == 500
+\]
+
+\[
+MIN\_STROKE\_POINTS == 50
+\]
+
+\section{State-Space Schema}
+
+The central state of NeuroScript tracks registered users, uploaded samples, extracted features, model predictions, and generated explanations.
+
+\begin{schema}{NeuroScript}
+registeredUsers : \power USER \\
+userRoles : USER \pfun ROLE \\
+samples : SAMPLEID \pfun USER \\
+sampleStatus : SAMPLEID \pfun SAMPLESTATUS \\
+features : SAMPLEID \pfun FEATUREVECTOR \\
+predictions : SAMPLEID \pfun CONDITION \\
+explanations : SAMPLEID \pfun EXPLANATION \\
+sampleCount : USER \fun \nat
+\where
+dom userRoles = registeredUsers \\
+dom samples \subseteq dom sampleStatus \\
+dom predictions \subseteq dom features \\
+dom explanations \subseteq dom predictions \\
+\forall u : registeredUsers @ \\
+\t1 sampleCount~u = \# \{ s : dom samples | samples~s = u \} \\
+\forall u : registeredUsers @ \\
+\t1 sampleCount~u \leq MAX\_SAMPLES\_PER\_USER
+\end{schema}
+
+\subsection*{Invariant Explanation}
+
+\begin{itemize}
+    \item Every user with a role is a registered user and vice versa.
+    \item A sample can only have a status if it belongs to the samples map.
+    \item Features may only exist for known samples.
+    \item Predictions require features.
+    \item Explanations require predictions.
+    \item Sample count must not exceed the per-user limit.
+\end{itemize}
+
+\section{Initial-State Schema}
+
+When the system is first deployed, no users, samples, or analysis results exist.
+
+\begin{schema}{InitNeuroScript}
+NeuroScript
+\where
+registeredUsers = \emptyset \\
+userRoles = \emptyset \\
+samples = \emptyset \\
+sampleStatus = \emptyset \\
+features = \emptyset \\
+predictions = \emptyset \\
+explanations = \emptyset \\
+sampleCount = \emptyset
+\end{schema}
+
+\section{Operational Schemas}
+
+\subsection{User Registration}
+
+\subsubsection*{Normal Case}
+
+\begin{schema}{RegisterUser}
+\Delta NeuroScript \\
+newUser? : USER \\
+role? : ROLE \\
+result! : REPORT
+\where
+newUser? \notin registeredUsers \\
+registeredUsers' = registeredUsers \cup \{newUser?\} \\
+userRoles' = userRoles \cup \{newUser? \mapsto role?\} \\
+samples' = samples \\
+sampleStatus' = sampleStatus \\
+features' = features \\
+predictions' = predictions \\
+explanations' = explanations \\
+sampleCount' = sampleCount \oplus \{newUser? \mapsto 0\} \\
+result! = success
+\end{schema}
+
+\subsubsection*{Error Case}
+
+\begin{schema}{UserAlreadyExists}
+\Xi NeuroScript \\
+newUser? : USER \\
+result! : REPORT
+\where
+newUser? \in registeredUsers \\
+result! = alreadyExists
+\end{schema}
+
+\[
+RRegisterUser \defs RegisterUser \lor UserAlreadyExists
+\]
+
+\subsection{User Login}
+
+\begin{schema}{LoginUser}
+\Xi NeuroScript \\
+user? : USER \\
+result! : REPORT
+\where
+user? \in registeredUsers \\
+result! = success
+\end{schema}
+
+\begin{schema}{LoginFail}
+\Xi NeuroScript \\
+user? : USER \\
+result! : REPORT
+\where
+user? \notin registeredUsers \\
+result! = notFound
+\end{schema}
+
+\[
+RLoginUser \defs LoginUser \lor LoginFail
+\]
+
+\subsection{Upload Handwriting Sample}
+
+\begin{schema}{UploadSample}
+\Delta NeuroScript \\
+user? : USER \\
+sid? : SAMPLEID \\
+result! : REPORT
+\where
+user? \in registeredUsers \\
+sid? \notin dom samples \\
+sampleCount~user? < MAX\_SAMPLES\_PER\_USER \\
+samples' = samples \cup \{sid? \mapsto user?\} \\
+sampleStatus' = sampleStatus \cup \{sid? \mapsto Pending\} \\
+features' = features \\
+predictions' = predictions \\
+explanations' = explanations \\
+sampleCount' = sampleCount \oplus \{user? \mapsto sampleCount~user? + 1\} \\
+result! = success
+\end{schema}
+
+\subsection{Preprocess and Extract Features}
+
+\begin{schema}{ExtractFeatures}
+\Delta NeuroScript \\
+sid? : SAMPLEID \\
+fv? : FEATUREVECTOR \\
+result! : REPORT
+\where
+sid? \in dom samples \\
+sampleStatus~sid? = Pending \\
+features' = features \cup \{sid? \mapsto fv?\} \\
+sampleStatus' = sampleStatus \oplus \{sid? \mapsto Processing\} \\
+predictions' = predictions \\
+explanations' = explanations \\
+samples' = samples \\
+registeredUsers' = registeredUsers \\
+sampleCount' = sampleCount \\
+result! = success
+\end{schema}
+
+\subsection{Classify Sample}
+
+\begin{schema}{ClassifySample}
+\Delta NeuroScript \\
+sid? : SAMPLEID \\
+cond? : CONDITION \\
+result! : REPORT
+\where
+sid? \in dom features \\
+sid? \notin dom predictions \\
+predictions' = predictions \cup \{sid? \mapsto cond?\} \\
+sampleStatus' = sampleStatus \oplus \{sid? \mapsto Analysed\} \\
+features' = features \\
+samples' = samples \\
+registeredUsers' = registeredUsers \\
+sampleCount' = sampleCount \\
+explanations' = explanations \\
+result! = success
+\end{schema}
+
+\subsection{Generate Explanation}
+
+\begin{schema}{GenerateExplanation}
+\Delta NeuroScript \\
+sid? : SAMPLEID \\
+exp? : EXPLANATION \\
+result! : REPORT
+\where
+sid? \in dom predictions \\
+sid? \notin dom explanations \\
+explanations' = explanations \cup \{sid? \mapsto exp?\} \\
+registeredUsers' = registeredUsers \\
+sampleCount' = sampleCount \\
+sampleStatus' = sampleStatus \\
+samples' = samples \\
+features' = features \\
+predictions' = predictions \\
+result! = success
+\end{schema}
+
+\subsection{Retrieve Prediction Result}
+
+\begin{schema}{GetPrediction}
+\Xi NeuroScript \\
+sid? : SAMPLEID \\
+condition! : CONDITION \\
+result! : REPORT
+\where
+sid? \in dom predictions \\
+condition! = predictions~sid? \\
+result! = success
+\end{schema}
+
+\subsection{Search Samples by Condition}
+
+\begin{schema}{SearchByCondition}
+\Xi NeuroScript \\
+user? : USER \\
+cond? : CONDITION \\
+results! : \power SAMPLEID \\
+result! : REPORT
+\where
+user? \in registeredUsers \\
+results! = \{ s : dom predictions | \\
+\t1 samples~s = user? \land predictions~s = cond? \} \\
+result! = success
+\end{schema}
+
+\subsection{Archive Sample}
+
+\begin{schema}{ArchiveSample}
+\Delta NeuroScript \\
+sid? : SAMPLEID \\
+result! : REPORT
+\where
+sid? \in dom samples \\
+sampleStatus~sid? = Analysed \\
+sampleStatus' = sampleStatus \oplus \{sid? \mapsto Archived\} \\
+registeredUsers' = registeredUsers \\
+samples' = samples \\
+features' = features \\
+predictions' = predictions \\
+sampleCount' = sampleCount \\
+explanations' = explanations \\
+result! = success
+\end{schema}
+
+\subsection{Delete User Account}
+
+\begin{schema}{DeleteUser}
+\Delta NeuroScript \\
+target? : USER \\
+result! : REPORT
+\where
+target? \in registeredUsers \\
+registeredUsers' = registeredUsers \setminus \{target?\} \\
+samples' = \{ s : dom samples | samples~s \neq target? \} \ndres samples \\
+sampleStatus' = \{ s : dom samples | samples~s \neq target? \} \ndres sampleStatus \\
+features' = \{ s : dom samples | samples~s \neq target? \} \ndres features \\
+predictions' = \{ s : dom samples | samples~s \neq target? \} \ndres predictions \\
+explanations' = \{ s : dom samples | samples~s \neq target? \} \ndres explanations \\
+result! = success
+\end{schema}
+
+\section{Summary of Schemas}
+
+\begin{longtable}{|p{4cm}|p{3cm}|p{7cm}|}
+\hline
+\textbf{Schema} & \textbf{Type} & \textbf{Purpose} \\
+\hline
+NeuroScript & State Space & Core system state and invariants \\
+\hline
+InitNeuroScript & Initial State & All sets empty at start-up \\
+\hline
+RegisterUser & $\Delta$ Op & Add a new user with a role \\
+\hline
+LoginUser & $\Xi$ Op & Authenticate existing user \\
+\hline
+UploadSample & $\Delta$ Op & Upload handwriting sample \\
+\hline
+ExtractFeatures & $\Delta$ Op & Preprocess and extract feature vector \\
+\hline
+ClassifySample & $\Delta$ Op & LSTM-based neurological prediction \\
+\hline
+GenerateExplanation & $\Delta$ Op & Produce SHAP/LIME explanation \\
+\hline
+GetPrediction & $\Xi$ Op & Query prediction result \\
+\hline
+SearchByCondition & $\Xi$ Op & Search samples by predicted condition \\
+\hline
+ArchiveSample & $\Delta$ Op & Archive analysed sample \\
+\hline
+DeleteUser & $\Delta$ Op & Remove user and associated data \\
+\hline
+\end{longtable}
+
+\vspace{0.5cm}
+
+All major operations have corresponding error schemas and are combined into robust operations using the Z disjunction operator $(\lor)$, ensuring every possible input scenario produces a defined output via the REPORT free type.
+
+\end{document}
